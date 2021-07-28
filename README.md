@@ -17,6 +17,9 @@
 详见：https://github.com/wang-xinyu/tensorrtx/tree/master/yolov5
     ```bash
     yolov5m.pt->yolov5m.wts->yolov5m.engine
+    mkdir models
+    cd models/
+    cp xxx.engine ./
     ```
 ### Usage
 1. yolov5m.pt->yolov5m.wts->yolov5m.engine，得到engine文件，并放到models文件夹下。

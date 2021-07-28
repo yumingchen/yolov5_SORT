@@ -1,0 +1,4 @@
+tensorrt==7.1.3.4
+pycuda
+collections
+opencv-python

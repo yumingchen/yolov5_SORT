@@ -25,18 +25,18 @@ def plot_one_box(x, img, color=None, label=None, line_thickness=None):
     return:
         no return
     """
-    tl = ( line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1)  # line/font thickness
-    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    thickness = ( line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1)  # line/font thickness
+    point1, point2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    cv2.rectangle(img, point1, point2, color, thickness=thickness, lineType=cv2.LINE_AA)
     if label:
-        tf = max(tl - 1, 1)  # font thickness
-        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
-        c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
-        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
-        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA,)
+        tf = max(thickness - 1, 1)  # font thickness
+        t_size = cv2.getTextSize(label, 0, fontScale=thickness / 3, thickness=tf)[0]
+        point2 = point1[0] + t_size[0], point1[1] - t_size[1] - 3
+        cv2.rectangle(img, point1, point2, color, -1, cv2.LINE_AA)  # filled
+        cv2.putText(img, label, (point1[0], point1[1] - 2), 0, thickness / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA,)
 
 
-def preprocess_image(img_from_video, INPUT_W, INPUT_H):
+def preprocess_image(image_raw, INPUT_W, INPUT_H):
     """
     description: Read an image from image path, convert it to RGB,
                  resize and pad it to target size, normalize to [0,1],
@@ -49,21 +49,19 @@ def preprocess_image(img_from_video, INPUT_W, INPUT_H):
         h: original height
         w: original width
     """
-    # image_raw = cv2.imread(input_image_path)
-    image_raw = img_from_video
-    h, w, c = image_raw.shape
+    origin_h, origin_w, channel = image_raw.shape
     image = cv2.cvtColor(image_raw, cv2.COLOR_BGR2RGB)
     # Calculate widht and height and paddings
-    r_w = INPUT_W / w
-    r_h = INPUT_H / h
-    if r_h > r_w:
+    ratio_w = INPUT_W / origin_w
+    ratio_h = INPUT_H / origin_h
+    if ratio_h > ratio_w:
         tw = INPUT_W
-        th = int(r_w * h)
+        th = int(ratio_w * origin_h)
         tx1 = tx2 = 0
         ty1 = int((INPUT_H - th) / 2)
         ty2 = INPUT_H - th - ty1
     else:
-        tw = int(r_h * w)
+        tw = int(ratio_h * origin_w)
         th = INPUT_H
         tx1 = int((INPUT_W - tw) / 2)
         tx2 = INPUT_W - tw - tx1
@@ -71,9 +69,7 @@ def preprocess_image(img_from_video, INPUT_W, INPUT_H):
     # Resize the image with long side while maintaining ratio
     image = cv2.resize(image, (tw, th))
     # Pad the short side with (128,128,128)
-    image = cv2.copyMakeBorder(
-        image, ty1, ty2, tx1, tx2, cv2.BORDER_CONSTANT, (128, 128, 128)
-    )
+    image = cv2.copyMakeBorder(image, ty1, ty2, tx1, tx2, cv2.BORDER_CONSTANT, (128, 128, 128))
     image = image.astype(np.float32)
     # Normalize to [0,1]
     image /= 255.0
@@ -83,7 +79,7 @@ def preprocess_image(img_from_video, INPUT_W, INPUT_H):
     image = np.expand_dims(image, axis=0)
     # Convert the image to row-major order, also known as "C order":
     image = np.ascontiguousarray(image)
-    return image, image_raw, h, w
+    return image, origin_h, origin_w
 
 
 def xywh2xyxy(origin_h, origin_w, det, INPUT_W, INPUT_H):
@@ -98,20 +94,20 @@ def xywh2xyxy(origin_h, origin_w, det, INPUT_W, INPUT_H):
     """
     # y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
     bbox_xyxy = np.zeros_like(det)
-    r_w = INPUT_W / origin_w
-    r_h = INPUT_H / origin_h
-    if r_h > r_w:
+    ratio_w = INPUT_W / origin_w
+    ratio_h = INPUT_H / origin_h
+    if ratio_h > ratio_w:
         bbox_xyxy[:, 0] = det[:, 0] - det[:, 2] / 2
         bbox_xyxy[:, 2] = det[:, 0] + det[:, 2] / 2
-        bbox_xyxy[:, 1] = det[:, 1] - det[:, 3] / 2 - (INPUT_H - r_w * origin_h) / 2
-        bbox_xyxy[:, 3] = det[:, 1] + det[:, 3] / 2 - (INPUT_H - r_w * origin_h) / 2
-        bbox_xyxy /= r_w
+        bbox_xyxy[:, 1] = det[:, 1] - det[:, 3] / 2 - (INPUT_H - ratio_w * origin_h) / 2
+        bbox_xyxy[:, 3] = det[:, 1] + det[:, 3] / 2 - (INPUT_H - ratio_w * origin_h) / 2
+        bbox_xyxy /= ratio_w
     else:
-        bbox_xyxy[:, 0] = det[:, 0] - det[:, 2] / 2 - (INPUT_W - r_h * origin_w) / 2
-        bbox_xyxy[:, 2] = det[:, 0] + det[:, 2] / 2 - (INPUT_W - r_h * origin_w) / 2
+        bbox_xyxy[:, 0] = det[:, 0] - det[:, 2] / 2 - (INPUT_W - ratio_h * origin_w) / 2
+        bbox_xyxy[:, 2] = det[:, 0] + det[:, 2] / 2 - (INPUT_W - ratio_h * origin_w) / 2
         bbox_xyxy[:, 1] = det[:, 1] - det[:, 3] / 2
         bbox_xyxy[:, 3] = det[:, 1] + det[:, 3] / 2
-        bbox_xyxy /= r_h
+        bbox_xyxy /= ratio_h
 
     return bbox_xyxy
 
@@ -163,18 +159,15 @@ def post_process(output, origin_h, origin_w, CONF_THRESH, IOU_THRESHOLD, INPUT_W
     # Reshape to a two dimentional ndarray
     pred = np.reshape(output[1:], (-1, 6))[:num, :]
     # Choose those boxes that score > CONF_THRESH
-    si = pred[:, 4] > CONF_THRESH
-    pred = pred[si, :]
+    conf_id = pred[:, 4] > CONF_THRESH
+    pred = pred[conf_id, :]
     # Trandform bbox from [center_x, center_y, w, h] to [x1, y1, x2, y2]
     pred[:, :4] = xywh2xyxy(origin_h, origin_w, pred[:, :4], INPUT_W, INPUT_H)
 
     #####################NMS in all  boxes ##################
     keep = nms_np(pred, IOU_THRESHOLD)
-    nms_pred = pred[keep]
+    nms_pred = pred[keep]  # [x1,y1,x2,y2,score,cls_id]
 
-    # result_boxes = nms_pred[:, :4]
-    # result_scores = nms_pred[:, 4]
-    # result_classid = nms_pred[:, 5]
     return nms_pred
 
 
@@ -221,3 +214,34 @@ def ccw(A, B, C):
 # 检测AB和CD两条直线是否相交
 def intersect(A, B, C, D):
     return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+
+
+def show_statistics_info(frame, counts, counts_left, counts_right, target_id, categories, colors):
+    fontFace = cv2.FONT_HERSHEY_PLAIN
+    line = cv2.LINE_AA
+    fontScale = 1.0
+    start_width = 10
+    height_start = 50
+    height_gap = 15
+    thickness = 1
+    text = 'sum: {}'.format(sum(counts.values()))
+    cv2.putText(frame, text, (start_width, height_start), fontFace, fontScale, (0, 255, 0), thickness, lineType=line)
+    text = 'sum_left: {}'.format(sum(counts_left.values()))
+    cv2.putText(frame, text, (start_width + 150, height_start), fontFace, fontScale, (0, 255, 0), thickness,
+                lineType=line)
+    text = 'sum_right: {}'.format(sum(counts_right.values()))
+    cv2.putText(frame, text, (start_width + 350, height_start), fontFace, fontScale, (0, 255, 0), thickness)
+    for i, cls_id in enumerate(target_id):
+        text = '{}: {}'.format(categories[cls_id], counts[cls_id])
+        cv2.putText(frame, text, (start_width, height_start + (i + 1) * height_gap), fontFace, fontScale,
+                    colors[cls_id],
+                    thickness)
+        text = '{}: {}'.format(categories[cls_id], counts_left[cls_id])
+        cv2.putText(frame, text, (start_width + 150, height_start + (i + 1) * height_gap), fontFace, fontScale,
+                    colors[cls_id],
+                    thickness)
+        text = '{}: {}'.format(categories[cls_id], counts_right[cls_id])
+        cv2.putText(frame, text, (start_width + 350, height_start + (i + 1) * height_gap), fontFace, fontScale,
+                    colors[cls_id],
+                    thickness)
+    return frame

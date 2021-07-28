@@ -90,15 +90,6 @@ class YoLov5TRT(object):
         host_outputs = self.host_outputs
         cuda_outputs = self.cuda_outputs
         bindings = self.bindings
-        # Do image preprocess
-        input_image, image_raw, origin_h, origin_w = utils.preprocess_image(
-            img_from_video, INPUT_W, INPUT_H
-        )
-
-        print('img_from_video=', img_from_video.shape)
-        print('input_image=', input_image.shape)
-        print('image_raw=', image_raw.shape)
-        print('input_image=', origin_h, origin_w)
 
         # Copy input image to host buffer
         np.copyto(host_inputs[0], input_image.ravel())
@@ -115,12 +106,7 @@ class YoLov5TRT(object):
         # Here we use the first row of output in that batch_size = 1
         output = host_outputs[0]
 
-        # Do postprocess
-        nms_pred = utils.post_process(
-            output, origin_h, origin_w, CONF_THRESH, IOU_THRESHOLD, INPUT_W, INPUT_H
-        )
-
-        return image_raw, nms_pred
+        return output
 
     def destroy(self):
         # Remove any context from the top of the context stack, deactivating it.
@@ -132,15 +118,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--usb', type=int, default=4, help='usb video serial number')
     parser.add_argument('--side', action='store_true', help='side or front, 摄像头在车道侧面还是正面')
+    parser.add_argument('--show', action='store_true', help='是否显示图像')
+    parser.add_argument('--save_vedio', action='store_true', help='是否保存output.mp4')
     args = parser.parse_args()
     print(args)
     # load custom plugins
     PLUGIN_LIBRARY = 'yolov5_lib/libmyplugins.so'
     ctypes.CDLL(PLUGIN_LIBRARY)
-    engine_file_path  = 'models/yolov5l.engine'
+    engine_file_path  = 'models/yolov5m.engine'
 
     # load coco labels
     categories = utils.get_classes_name()
+    colors = utils.gen_colors(len(categories))
     target_id = [2, 5, 7]
     counts = dict()
     [counts.update({id:0}) for id in target_id]
@@ -151,14 +140,10 @@ if __name__ == "__main__":
     counts_left = dict()
     [counts_left.update({id: 0}) for id in target_id]
 
-
     # a  YoLov5TRT instance
     yolov5_wrapper = YoLov5TRT(engine_file_path)
     # 创建跟踪器
     tracker = Sort()
-    # 生成多种不同的颜色
-    np.random.seed(1024)
-    COLORS = np.random.randint(0, 255, size=(200, 3), dtype='uint8')
     # 存储中心点
     pts = [deque(maxlen=30) for _ in range(9999)]
     
@@ -174,14 +159,13 @@ if __name__ == "__main__":
     else:
         cap = cv2.VideoCapture('input/test.mp4')
 
-    ##############################CYM: 保存视频########################################
-    size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    print("[INFO] video size :{}".format(size))
-    fps_cur = int(cap.get(cv2.CAP_PROP_FPS))
-    print("[INFO] video fps :{}".format(fps_cur))
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    writer = cv2.VideoWriter("input/output.mp4", fourcc, fps_cur, size, True)
-    ##############################CYM: 保存视频########################################
+    if args.save_vedio:
+        size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        print("[INFO] video size :{}".format(size))
+        fps_cur = int(cap.get(cv2.CAP_PROP_FPS))
+        print("[INFO] video fps :{}".format(fps_cur))
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter("input/output.mp4", fourcc, fps_cur, size, True)
     fps = 0.0
     tic = time.time()
     while(1):
@@ -190,7 +174,16 @@ if __name__ == "__main__":
             print('ERROR: Unable to read image!')
             break
 
-        image_raw, nms_pred = yolov5_wrapper.infer_video(frame)
+        # Do image preprocess
+        start_pre = time.time()
+        input_image, origin_h, origin_w = utils.preprocess_image(frame, INPUT_W, INPUT_H)
+        print(frame.shape)
+        end_pre = time.time()
+        output = yolov5_wrapper.infer_video(input_image)
+        end_infer = time.time()
+        # Do postprocess
+        nms_pred = utils.post_process(output, origin_h, origin_w, CONF_THRESH, IOU_THRESHOLD, INPUT_W, INPUT_H)
+
         ################################过滤非目标类别###################################
         target_pred_idx = np.array([False] * len(nms_pred))
         if len(nms_pred) > 0:
@@ -198,19 +191,11 @@ if __name__ == "__main__":
                 target_pred_idx = target_pred_idx | (nms_pred[:,5]==cls_id)
             nms_pred = nms_pred[target_pred_idx]
         ################################过滤非目标类别###################################
+        end_post = time.time()
+        print('the time for pre-processing is [{}]'.format(end_pre - start_pre))
+        print('the time for inference is [{}]'.format(end_infer - end_pre))
+        print('the time for post-processing is [{}]'.format(end_post - end_infer))
 
-        colors = utils.gen_colors(len(categories))
-
-        ###############################CYM：设定计数区域############################
-        # target_area = (0, 200, frame.shape[1], frame.shape[0] - 100)
-        # cv2.line(frame, (target_area[0], target_area[1]), (target_area[2], target_area[1]), (0, 255, 0),
-        #          thickness=5)
-        # cv2.line(frame, (target_area[0], target_area[3]), (target_area[2], target_area[3]), (0, 255, 0),
-        #          thickness=5)
-        # nms_pred_idx = (nms_pred[:, 0] > target_area[0]) & (nms_pred[:, 1] > target_area[1]) \
-        #                & (nms_pred[:, 2] < target_area[2]) & (nms_pred[:, 3] < target_area[3])
-        # nms_pred = nms_pred[nms_pred_idx]
-        ###############################CYM：设定计数区域############################
         if args.side:
             line = [(frame.shape[1] // 2, 0), (frame.shape[1] // 2, frame.shape[1])]  # 车道侧面
         else:
@@ -219,7 +204,9 @@ if __name__ == "__main__":
         cv2.line(frame, line[0], line[1], (0, 255, 0), thickness=5)
 
         if len(nms_pred) > 0:
+            start_track = time.time()
             tracks = tracker.update(nms_pred)  # [x1, y1, x2, y2, id]
+            end_track = time.time()
 
             # Draw rectangles and labels on the original image
             for i in range(len(tracks)):
@@ -244,34 +231,17 @@ if __name__ == "__main__":
                                 counts_left[cls_id] += 1
                             else:
                                 counts_right[cls_id] += 1
-
-                if int(nms_pred[i][5]) in target_id:
-                    utils.plot_one_box( bbox, frame, color=colors[cls_id],
-                        label="{}_id_{}:{:.2f}".format(categories[cls_id], indexID, score),
-                    )
-        fontFace = cv2.FONT_HERSHEY_PLAIN
-        line = cv2.LINE_AA
-        fontScale = 1.0
-        start_width = 10
-        height_start = 50
-        height_gap = 15
-        thickness = 1
-        text = 'sum: {}'.format(sum(counts.values()))
-        cv2.putText(frame, text, (start_width, height_start), fontFace, fontScale, (0,255,0), thickness, lineType=line)
-        text = 'sum_left: {}'.format(sum(counts_left.values()))
-        cv2.putText(frame, text, (start_width + 150, height_start), fontFace, fontScale, (0, 255, 0), thickness, lineType=line)
-        text = 'sum_right: {}'.format(sum(counts_right.values()))
-        cv2.putText(frame, text, (start_width+350, height_start), fontFace, fontScale, (0,255,0), thickness)
-        for i, cls_id in enumerate(target_id):
-            text = '{}: {}'.format(categories[cls_id], counts[cls_id])
-            cv2.putText(frame, text, (start_width, height_start + (i + 1) * height_gap), fontFace, fontScale, colors[cls_id],
-                        thickness)
-            text = '{}: {}'.format(categories[cls_id], counts_left[cls_id])
-            cv2.putText(frame, text, (start_width+150, height_start + (i + 1) * height_gap), fontFace, fontScale, colors[cls_id],
-                        thickness)
-            text = '{}: {}'.format(categories[cls_id], counts_right[cls_id])
-            cv2.putText(frame, text, (start_width+350, height_start + (i + 1) * height_gap), fontFace, fontScale, colors[cls_id],
-                        thickness)
+                if args.show:
+                    if int(nms_pred[i][5]) in target_id:
+                        utils.plot_one_box( bbox, frame, color=colors[cls_id],
+                            label="{}_id_{}:{:.2f}".format(categories[cls_id], indexID, score),
+                        )
+            end_statistics = time.time()
+            print('the time for tracking is [{}]'.format(end_track - start_track))
+            print('the time for statistics is [{}]'.format(end_statistics - end_track))
+        start_show = time.time()
+        if args.show:
+            frame = utils.show_statistics_info(frame, counts, counts_left, counts_right, target_id, categories, colors)
 
         frame = utils.show_fps(frame, fps)
         toc = time.time()
@@ -279,12 +249,15 @@ if __name__ == "__main__":
         # calculate an exponentially decaying average of fps number
         fps = curr_fps if fps == 0.0 else (fps*0.95 + curr_fps*0.05)
         tic = toc
-        writer.write(frame)
+        if args.save_vedio:
+            writer.write(frame)
         cv2.imshow(WINDOW_NAME, frame)
         if cv2.waitKey(1)==27 or 0xff == ord('q'):
             break
-        # time.sleep(0.08)
-    writer.release()
+        end_show = time.time()
+        print('the time for showing is [{}]'.format(end_show - start_show))
+    if args.save_vedio:
+        writer.release()
     cap.release()
     cv2.destroyAllWindows()
     # destroy the instance

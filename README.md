@@ -20,11 +20,14 @@
     ```
 ### Usage
 1. yolov5m.pt->yolov5m.wts->yolov5m.engine，得到engine文件，并放到models文件夹下。
-2. tensorrtx编译安装成功后，会生成libmyplugins.so:
+2. tensorrtx编译安装成功后，会生成libmyplugins.so, 将libmyplugins.so复制到yolov5_lib文件下。
     ```bash
+    mkdir yolov5_lib
+    cd yolov5_lib
+    cp xxx/tensorrtx/yolov5/build/libmyplugins.so ./
     xxx/tensorrtx/yolov5/build/libmyplugins.so 
     ```
-   将libmyplugins.so复制到yolov5_lib文件下。
+   
 3. parameter
     ```bash
     --side: True：表示摄像头在道路侧面，False：表示摄像头在道路正面。
